@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>图小鱼 · 本地压缩图片｜PNG 转 JPG、转 WebP</title>
+<meta name="description" content="在浏览器里压缩图片、PNG 转 JPG、JPG 转 WebP，支持批量。图片不上传服务器，压完直接下载，手机电脑都能用，打开网页即可。">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob: data:; connect-src 'none'; style-src 'self'; script-src 'self'; worker-src 'self' blob:; base-uri 'none'; form-action 'none'">
+<link rel="canonical" href="https://freddywang12138.github.io/tuxiaoyu/">
+<link rel="stylesheet" href="./styles/main.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "图小鱼",
+  "url": "https://freddywang12138.github.io/tuxiaoyu/",
+  "applicationCategory": "MultimediaApplication",
+  "operatingSystem": "Any",
+  "inLanguage": "zh-CN",
+  "description": "在浏览器本地压缩图片、转换格式，图片不上传服务器。",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" }
+}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">跳到主内容</a>
+
+<header class="top">
+  <div class="wrap top-inner">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 24" aria-hidden="true" focusable="false">
+        <path d="M2 12c4-6 9-9 14-9s10 3 14 9c-4 6-9 9-14 9S6 18 2 12z" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <circle cx="21" cy="10.5" r="1.6" fill="currentColor"/>
+        <path d="M8 6.5c2 3.5 6 5.5 10.5 5.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+      </svg>
+      <span class="brand-name">图小鱼</span>
+    </div>
+    <p class="top-tag">图片压缩 / 格式转换，不上传</p>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+
+  <section class="intro">
+    <h1>把图片压小，不必上传</h1>
+    <p class="sub">压缩、转格式都在浏览器里完成，处理完直接下载；图片不经过任何服务器。</p>
+  </section>
+
+  <section class="picker" aria-labelledby="picker-title">
+    <h2 class="sr-only" id="picker-title">选择图片</h2>
+    <label class="drop" id="drop" for="file-input" tabindex="0">
+      <span class="drop-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" focusable="false"><path d="M12 16V4m0 0L7 9m5-5 5 5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="drop-title">把图片拖进来，或点一下选择</span>
+      <span class="drop-sub">支持 JPG · PNG · WebP ｜ 单张 ≤ 80MB ｜ 一次 ≤ 60 张</span>
+      <span class="drop-privacy">图片只在这台设备上处理，不会上传</span>
+    </label>
+    <input id="file-input" class="sr-only" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+  </section>
+
+  <p id="alert" class="alert" role="status" hidden></p>
+
+  <section class="options" id="options" hidden aria-label="输出设置">
+    <div class="opt-group">
+      <span class="opt-label" id="fmt-label">输出格式</span>
+      <div class="seg" role="radiogroup" aria-labelledby="fmt-label" id="fmt-group">
+        <label class="seg-item"><input type="radio" name="fmt" value="keep" checked><span>保持原格式</span></label>
+        <label class="seg-item"><input type="radio" name="fmt" value="jpeg"><span>转 JPG</span></label>
+        <label class="seg-item"><input type="radio" name="fmt" value="webp"><span>转 WebP</span></label>
+      </div>
+    </div>
+    <div class="opt-group">
+      <span class="opt-label" id="q-label">压缩程度</span>
+      <div class="seg" role="radiogroup" aria-labelledby="q-label" id="q-group">
+        <label class="seg-item"><input type="radio" name="q" value="low"><span>体积更小</span></label>
+        <label class="seg-item"><input type="radio" name="q" value="mid" checked><span>平衡</span></label>
+        <label class="seg-item"><input type="radio" name="q" value="high"><span>质量更高</span></label>
+      </div>
+    </div>
+    <p class="opt-hint" id="fmt-hint"></p>
+  </section>
+
+  <section class="results" id="results" hidden aria-labelledby="results-title">
+    <h2 class="sr-only" id="results-title">处理结果</h2>
+    <div class="summary" id="summary"></div>
+    <ul class="list" id="list"></ul>
+    <div class="actions">
+      <button class="btn primary" id="download-all" type="button">全部下载</button>
+      <button class="btn ghost" id="cancel" type="button" hidden>取消剩余</button>
+      <button class="btn ghost" id="reset" type="button">再压一批</button>
+    </div>
+  </section>
+
+  <p class="sr-only" id="live" aria-live="polite"></p>
+
+  <section class="faq">
+    <h2>怎么压缩图片：三步搞定</h2>
+    <ol class="steps">
+      <li>把图片拖进来，或点上面的区域选图；多张可以一次拖。</li>
+      <li>选输出格式和压缩程度。不选也行，默认设置就能直接用。</li>
+      <li>压完点「下载这张」，或者一次点「全部下载」。</li>
+    </ol>
+
+    <h2>PNG 转 JPG、转 WebP，什么时候该换格式</h2>
+    <p>要传给别人、要贴到网页上，JPG 通常更小；要放在网站上做插图、又想让体积更小，WebP 更合适。PNG 适合需要透明背景的图，但它压不小——如果你的 PNG 是一张照片，转成 JPG 往往会小很多。</p>
+
+    <h2>图片不上传：隐私怎么自己验证</h2>
+    <p>这个页面没有上传接口。你选的图只留在当前标签页里，关掉就没了。想确认的话：按 F12 打开开发者工具，切到 Network 面板，然后拖一张图进来压缩——你应该只会看到本站的静态文件请求，不会有任何图片被发出去。页面还带了 <code>connect-src 'none'</code> 的内容安全策略，浏览器层面就不允许它往外连。</p>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p><strong>图小鱼</strong> · 浏览器本地图片压缩与格式转换</p>
+    <p class="foot-meta">无需注册 · 不上传 · 无追踪脚本</p>
+    <p class="foot-links">
+      <a href="https://github.com/FreddyWang12138/tuxiaoyu/issues/new?template=feedback.yml" rel="noopener">问题反馈</a>
+      <a href="https://github.com/FreddyWang12138/tuxiaoyu" rel="noopener">源代码</a>
+    </p>
+  </div>
+</footer>
+
+<script type="module" src="./assets/js/app.js"></script>
+</body>
+</html>

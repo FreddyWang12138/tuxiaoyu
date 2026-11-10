@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://freddywang12138.github.io/tuxiaoyu/sitemap.xml

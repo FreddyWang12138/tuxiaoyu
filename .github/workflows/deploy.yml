@@ -1,0 +1,66 @@
+name: deploy
+
+# 只从 main 自动上线；另留手动入口（回滚、补发时用）。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 最小权限：读代码 + 写 Pages + OIDC 取部署令牌。没有 contents: write，改不了仓库。
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Pages 同时只允许一个部署；不取消进行中的那次，避免线上停在半成品。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: 部署前测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup-node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 跑测试（不过不许上线）
+        run: |
+          set -euo pipefail
+          node --version
+          if [ ! -f tests/run.mjs ]; then
+            echo "::error::tests/run.mjs 不存在。测试缺失按失败处理，不允许 skip。"
+            exit 1
+          fi
+          node tests/run.mjs
+
+  deploy:
+    name: 部署到 GitHub Pages
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: configure-pages
+        uses: actions/configure-pages@v5
+
+      - name: upload-pages-artifact（站点根 = 仓库根）
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "."
+
+      - name: deploy-pages
+        id: deployment
+        uses: actions/deploy-pages@v4

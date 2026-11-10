@@ -1,0 +1,92 @@
+name: 使用反馈
+description: 说说你用图小鱼压缩或转换图片时，哪里顺手、哪里不顺手。30 秒能填完。
+title: "[反馈] "
+labels: ["type:feedback", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **先说隐私：请不要把图片本身、或带个人信息的截图直接贴进这里。**
+        这个 issue 是公开的，贴上来就等于公开了。描述图片时可以写「一张 12MB 的手机照片」「带人脸的合照」这种说法，不用真的传图。
+        另外，图小鱼的图片从来不上传服务器，所以我们这边也看不到你的图，只能靠你描述。
+
+  - type: textarea
+    id: what-did-you-do
+    attributes:
+      label: 你用它做了什么
+      description: 一句话说清场景就行，比如「把 20 张商品图压小后传到店铺后台」。
+      placeholder: 我想把手机里的一批照片压小，再发给同事。
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-vs-actual
+    attributes:
+      label: 期望 vs 实际
+      description: 你原本以为会发生什么，实际发生了什么。有数字更好，比如「期望压到 500KB 以内，实际是 1.2MB」。
+      placeholder: |
+        期望：10 张图一起压，压完能一次全部下载。
+        实际：只能一张一张点下载。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: 设备与浏览器
+      description: 选一个最接近的。不确定就选「其他」，我们再来问。
+      options:
+        - Windows Chrome
+        - macOS Chrome
+        - macOS Safari
+        - iPhone Safari
+        - Android Chrome
+        - 其他
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        下面三项选填。填了能帮我们更快判断问题出在哪，不填也能提交。
+
+  - type: input
+    id: image-size
+    attributes:
+      label: 大概多大的图
+      description: 单张大小或总大小，估个数量级就行。
+      placeholder: 单张 8MB 左右，一共 15 张
+    validations:
+      required: false
+
+  - type: input
+    id: image-count
+    attributes:
+      label: 一次处理多少张
+      description: 填个数字即可。
+      placeholder: "15"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: output-format
+    attributes:
+      label: 输出格式
+      description: 你选的是保持原格式，还是转成了别的格式。
+      options:
+        - 保持原格式
+        - 转 JPG
+        - 转 WebP
+        - 记不清了
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 还想补充的
+      description: 别的想法、建议，或者你希望我们优先修哪一点。
+      placeholder: 选填，没有就留空。
+    validations:
+      required: false

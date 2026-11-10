@@ -1,0 +1,40 @@
+name: ci
+
+# 拦坏 PR：PR 必跑；push 到任意分支也跑（这样先在分支上看到红/绿，再开 PR）。
+# 测试是零依赖的纯 node 脚本，所以不装任何 npm 包，也不缓存 node_modules。
+on:
+  pull_request:
+  push:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+# 同一个 ref 上新的 push 会取消旧 run，省 runner 配额；只影响 CI，不影响部署。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 测试（node tests/run.mjs）
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup-node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 跑测试（缺失即失败，不允许跳过）
+        run: |
+          set -euo pipefail
+          node --version
+          if [ ! -f tests/run.mjs ]; then
+            echo "::error::tests/run.mjs 不存在。测试缺失按失败处理，不允许 skip。"
+            exit 1
+          fi
+          node tests/run.mjs

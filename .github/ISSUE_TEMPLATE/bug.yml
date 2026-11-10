@@ -1,0 +1,81 @@
+name: 报个错误
+description: 有哪一步点不动、报错了、或者结果不对。填完我们就能开始查。
+title: "[错误] "
+labels: ["type:bug", "needs-repro"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **提醒：请不要把图片、或带个人信息的截图直接贴进来。**
+        这个 issue 是公开的。描述图片时说清「多大、什么格式、第几张」就够了，不用真的传图。图小鱼不接收你的图片，我们也看不到。
+
+  - type: dropdown
+    id: step
+    attributes:
+      label: 哪一步出错
+      description: 选一个最接近的。如果是好几个地方都不对，选最先出错的那一步。
+      options:
+        - 选图片 / 拖进来的时候
+        - 开始压缩之后
+        - 压缩完成，看结果列表的时候
+        - 点下载的时候
+        - 转换格式（JPG / WebP）的时候
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 具体发生了什么
+      description: 屏幕上出现了什么？有报错文字就照抄，有数字就写数字。
+      placeholder: |
+        拖进 5 张 PNG，进度停在「正在压第 2 / 5 张」不动了，等了 2 分钟还是这样。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproducible
+    attributes:
+      label: 能不能复现
+      description: 再试一次，同样的情况还会出现吗。
+      options:
+        - 每次都能重现
+        - 偶尔出现，不是每次都这样
+        - 只出现过一次，后来没再遇到
+        - 还没试过第二次
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: 浏览器
+      description: 选你出问题时用的那个。
+      options:
+        - Windows Chrome
+        - macOS Chrome
+        - macOS Safari
+        - iPhone Safari
+        - Android Chrome
+        - 其他
+    validations:
+      required: true
+
+  - type: input
+    id: image-info
+    attributes:
+      label: 出问题的图片是什么情况（选填）
+      description: 格式、大小、张数，估个大概就行。
+      placeholder: PNG，单张 12MB，一共 5 张
+    validations:
+      required: false
+
+  - type: textarea
+    id: console
+    attributes:
+      label: 控制台报错（选填）
+      description: 会开开发者工具的话，把 Console 里的红字贴过来。不会也没关系，跳过这栏。
+      render: shell
+    validations:
+      required: false
