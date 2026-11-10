@@ -29,7 +29,7 @@
 | `needs-triage` | 新进来、还没人分类的条目。维护者 48 小时内过一遍，打上 type:* 后摘掉。 |
 | `incident` | 线上不可用或大面积失败（页面打不开、批量处理全挂）。优先级最高，先修再归类。 |
 | `weekly-digest` | 每周汇总用：把当周新反馈、未回复、超期未处理的条目整理成一条，别单独讨论。 |
-| `good first issue` | 范围清楚、改一处就够、不需要熟悉整个仓库，适合第一次参与的人。 |
+| `good first issue` | 范围清楚、改一处就够、不需要熟悉整个仓库，适合头一次参与的人。 |
 
 一个 issue 可以有多个标签，但至少要有一个 `type:*`，并且不能同时挂着 `needs-triage` 和 `needs-repro` 太久——那是没人管的信号。
 
@@ -102,7 +102,7 @@ gh label create "needs-repro"       --color fbca04 --description "还没被复�
 gh label create "needs-triage"      --color e4e669 --description "新进来、还没分类" --force
 gh label create "incident"          --color b60205 --description "线上不可用或大面积失败" --force
 gh label create "weekly-digest"     --color 5319e7 --description "每周汇总，不要单独讨论" --force
-gh label create "good first issue"  --color 7057ff --description "范围清楚，适合第一次参与" --force
+gh label create "good first issue"  --color 7057ff --description "范围清楚，适合头一次参与" --force
 ```
 
 `--force` 让同名标签直接更新而不是报错（`good first issue` 是 GitHub 默认标签，一定会撞名）。gh 版本较旧不支持 `--force` 时，去掉它逐条执行，撞名报错不影响后面的命令。

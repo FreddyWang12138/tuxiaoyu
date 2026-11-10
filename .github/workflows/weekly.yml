@@ -1,0 +1,142 @@
+# 每周健康周报（R3 运维）
+#
+# 每周一北京时间 09:00 开一张 weekly-digest issue，汇总：
+#   1. 过去 7 天 Actions 运行成功率（GitHub API 统计，口径写在正文里）
+#   2. 未关闭的 incident 数
+#   3. 未关闭的 type:* 反馈数
+# 只用只读 API + issues: write，不改仓库内容、不发任何"访问量"类指标（静态站测不到，见 docs/runbook.md）。
+name: weekly-digest
+
+on:
+  schedule:
+    # UTC 周一 01:00 = 北京时间周一 09:00（UTC+8）。选早上 9 点：一周开始时看上周健康度，
+    # 且周一凌晨 UTC 的 Actions 排队最少，不容易被整点调度延迟拖晚。
+    - cron: '0 1 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read   # 只读：统计 runs 成功率
+  issues: write   # 开周报单 / 读 incident 与反馈
+
+concurrency:
+  group: weekly-digest
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GH_REPO: ${{ github.repository }}
+  TZ: Asia/Shanghai
+
+jobs:
+  digest:
+    name: weekly-digest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 统计过去 7 天运行数据
+        shell: bash
+        run: |
+          set -uo pipefail
+          # GNU date（ubuntu runner）优先；BSD date 兜底，方便本地复跑
+          SINCE="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ)"
+          RUNS="$RUNNER_TEMP/runs.json"
+
+          # GitHub API：按创建时间过滤，翻页取全。失败时给空数组，不让周报整体挂掉。
+          if ! gh api --method GET "repos/${GH_REPO}/actions/runs" \
+                 -f per_page=100 -f "created=>=${SINCE}" --paginate > "$RUNS" 2>"$RUNNER_TEMP/runs.err"; then
+            echo "::warning::拉取 runs 失败：$(head -c 300 "$RUNNER_TEMP/runs.err")"
+            echo '[]' > "$RUNS"
+          fi
+
+          jq -s '[.[].workflow_runs[]] | map(select(.status == "completed"))' "$RUNS" > "$RUNNER_TEMP/runs-done.json" 2>/dev/null \
+            || echo '[]' > "$RUNNER_TEMP/runs-done.json"
+
+          TOTAL="$(jq 'length' "$RUNNER_TEMP/runs-done.json")"
+          OK="$(jq '[.[] | select(.conclusion == "success")] | length' "$RUNNER_TEMP/runs-done.json")"
+          FAIL="$(jq '[.[] | select(.conclusion == "failure")] | length' "$RUNNER_TEMP/runs-done.json")"
+          RATE="$(awk -v ok="$OK" -v total="$TOTAL" 'BEGIN { if (total == 0) printf "n/a"; else printf "%.1f%%", ok * 100 / total }')"
+
+          INCIDENTS="$(gh issue list --label incident --state open --limit 100 --json number --jq 'length' 2>/dev/null || echo 0)"
+
+          gh issue list --state open --limit 200 --json number,title,labels > "$RUNNER_TEMP/open-issues.json" 2>/dev/null \
+            || echo '[]' > "$RUNNER_TEMP/open-issues.json"
+          FEEDBACK="$(jq '[.[] | select(any(.labels[].name; startswith("type:")))] | length' "$RUNNER_TEMP/open-issues.json")"
+
+          echo "since=${SINCE}" >> "$GITHUB_OUTPUT"
+          echo "total=${TOTAL}" >> "$GITHUB_OUTPUT"
+          echo "ok=${OK}" >> "$GITHUB_OUTPUT"
+          echo "fail=${FAIL}" >> "$GITHUB_OUTPUT"
+          echo "rate=${RATE}" >> "$GITHUB_OUTPUT"
+          echo "incidents=${INCIDENTS}" >> "$GITHUB_OUTPUT"
+          echo "feedback=${FEEDBACK}" >> "$GITHUB_OUTPUT"
+
+          echo "统计完成：runs=${TOTAL} ok=${OK} fail=${FAIL} rate=${RATE} incidents=${INCIDENTS} feedback=${FEEDBACK}"
+        id: stats
+
+      - name: 开周报 issue
+        env:
+          SINCE: ${{ steps.stats.outputs.since }}
+          TOTAL: ${{ steps.stats.outputs.total }}
+          OK: ${{ steps.stats.outputs.ok }}
+          FAIL: ${{ steps.stats.outputs.fail }}
+          RATE: ${{ steps.stats.outputs.rate }}
+          INCIDENTS: ${{ steps.stats.outputs.incidents }}
+          FEEDBACK: ${{ steps.stats.outputs.feedback }}
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          # 兜底：上游统计异常时不要因空变量让整步炸掉（宁可周报里写 0 / n/a）
+          TOTAL="${TOTAL:-0}"; OK="${OK:-0}"; FAIL="${FAIL:-0}"
+          INCIDENTS="${INCIDENTS:-0}"; FEEDBACK="${FEEDBACK:-0}"
+          RATE="${RATE:-n/a}"; SINCE="${SINCE:-unknown}"
+
+          gh label create weekly-digest --force --color 0E8A16 \
+            --description "每周健康周报（自动生成）" >/dev/null 2>&1 || true
+
+          STUDIO="$RUNNER_TEMP/weekly.md"
+          {
+            echo "## 过去 7 天健康度（自动统计，无人工修饰）"
+            echo ""
+            echo "统计窗口：${SINCE} 起 7 天（UTC）"
+            echo ""
+            echo "| 指标 | 数值 | 说明 |"
+            echo "| --- | --- | --- |"
+            echo "| workflow 成功率 | ${RATE}（${OK}/${TOTAL}） | 只统计已完成（completed）的运行；失败含 CI 红与探活红 |"
+            echo "| 失败运行数 | ${FAIL} | 连红意味着部署或探活在反复失败 |"
+            echo "| 未关闭 incident | ${INCIDENTS} | \`incident\` 标签且 state=open |"
+            echo "| 未关闭 type:* 反馈 | ${FEEDBACK} | \`type:bug\` / \`type:feature\` / \`type:ux\` 等 |"
+            echo ""
+            echo "### 分 workflow 明细"
+            echo ""
+            echo "| workflow | 运行数 | 成功 | 失败 |"
+            echo "| --- | --- | --- | --- |"
+            jq -r 'group_by(.name)[] | "| \(.[0].name) | \(length) | \([.[] | select(.conclusion == "success")] | length) | \([.[] | select(.conclusion == "failure")] | length) |"' \
+              "$RUNNER_TEMP/runs-done.json" 2>/dev/null || echo "| （无数据） | 0 | 0 | 0 |"
+            echo ""
+            echo "### 本周要不要迭代"
+            echo ""
+
+            NEED=0
+            REASON=""
+            if [ "$INCIDENTS" -gt 0 ]; then NEED=1; REASON="还有 ${INCIDENTS} 张未关闭 incident，先把稳定性收干净"; fi
+            if [ "$FAIL" -gt 3 ]; then NEED=1; REASON="${REASON:+${REASON}；}过去 7 天有 ${FAIL} 次失败运行，先查为什么反复红"; fi
+            if [ "$NEED" -eq 0 ] && [ "$FEEDBACK" -gt 0 ]; then
+              NEED=1; REASON="没有未关闭故障，从 ${FEEDBACK} 条 type:* 反馈里挑 1–2 条做迭代"
+            fi
+            if [ "$NEED" -eq 1 ]; then
+              echo "**结论：本周要迭代。** ${REASON}。"
+            else
+              echo "**结论：本周不需要为稳定性迭代。** 监控全绿、无未关闭故障，可保持现状；若想推进增长，去社区找 1 个真实用户试用并回收反馈，不要靠改代码假装有增长。"
+            fi
+            echo ""
+            echo "---"
+            echo ""
+            echo "> 本单由 \`.github/workflows/weekly.yml\` 自动生成。**本报告不含访问量/UV/PV**：纯静态站没有服务端日志，也没有埋点上报，访问量这套监控测不到（见 \`docs/runbook.md\`「诚实边界」）。"
+            echo "> 反馈流转：新反馈 → 已复现 → 已排期 → PR → 已发布 → 已回复提出者。最后一环不能省。"
+          } > "$STUDIO"
+
+          TITLE="[weekly] $(date +%G-W%V) 健康周报"
+          gh issue create --title "$TITLE" --label weekly-digest --body-file "$STUDIO"
+          echo "✅ 周报已创建：${TITLE}"

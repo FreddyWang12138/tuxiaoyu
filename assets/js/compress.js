@@ -13,7 +13,7 @@ export function qualityFor(type, level) {
   return table[level] === undefined ? table.mid : table[level];
 }
 
-const WORKER_URL = new URL('../workers/compress.worker.js', import.meta.url);
+const WORKER_URL = new URL('../../workers/compress.worker.js', import.meta.url);
 
 export class CompressPool {
   /** @param {number} limit 同时进行的任务数 */
@@ -26,6 +26,7 @@ export class CompressPool {
     this.busy = new Map();
     this.seq = 0;
     this.closed = false;
+    this.cancelled = false;
     this.workerBroken = false;
   }
 
@@ -37,6 +38,7 @@ export class CompressPool {
    */
   run(file, type, quality) {
     if (this.closed) return Promise.reject(new Error('closed'));
+    if (this.cancelled) return Promise.reject(new Error('cancelled'));
     if (this.workerBroken) return compressOnMainThread(file, type, quality);
     return new Promise((resolve, reject) => {
       const id = (this.seq += 1);
@@ -44,6 +46,17 @@ export class CompressPool {
       this.waiting.push({ id, file, type, quality });
       this.pump();
     });
+  }
+
+  /** 取消所有还没送进 worker 的任务；已经在编码的那几张中断不了。 */
+  cancelQueued() {
+    this.cancelled = true;
+    const queued = this.waiting.splice(0, this.waiting.length);
+    for (const job of queued) {
+      const rec = this.jobs.get(job.id);
+      this.jobs.delete(job.id);
+      if (rec) rec.reject(new Error('cancelled'));
+    }
   }
 
   pump() {

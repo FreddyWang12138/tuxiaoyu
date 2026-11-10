@@ -17,7 +17,6 @@ BUDGET_BYTES=$((80 * 1024))
 FAILED=0
 SERVER_PID=""
 TMPDIR_LOCAL="$(mktemp -d)"
-trap 'cleanup' EXIT INT TERM
 
 cleanup() {
   if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then

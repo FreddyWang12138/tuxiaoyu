@@ -53,6 +53,7 @@ async function init() {
     if (dom.input.files && dom.input.files.length) addFiles(Array.from(dom.input.files));
     dom.input.value = '';
   });
+  // 拖拽区本身可聚焦：Enter / Space 打开文件框（文件框藏在 label 里，视觉焦点由 .drop:focus-within 画）
   dom.drop.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
@@ -180,8 +181,22 @@ async function startProcessing() {
 
   const pool = new CompressPool(concurrency());
   state.pool = pool;
+  let cursor = 0;
+
+  // 只在线程真的空出来时才把下一张标成「处理中」，
+  // 这样「取消剩余」才有东西可取消。
+  const runner = async () => {
+    while (!state.cancelled) {
+      const item = queue[cursor];
+      cursor += 1;
+      if (!item) return;
+      await processOne(item, pool);
+    }
+  };
+
   try {
-    await Promise.all(queue.map((item) => processOne(item, pool)));
+    const lanes = Math.min(concurrency(), queue.length);
+    await Promise.all(Array.from({ length: lanes }, () => runner()));
   } finally {
     pool.destroy();
     state.pool = null;
@@ -211,10 +226,17 @@ async function processOne(item, pool) {
   try {
     const quality = qualityFor(target.type, state.settings.quality);
     const result = await pool.run(item.file, target.type, quality);
+    if (item.discard) {
+      item.status = 'cancelled';
+      item.out = null;
+      render();
+      return;
+    }
     applyResult(item, result);
   } catch (error) {
-    item.status = 'failed';
-    item.error = humanError(error && error.message);
+    const code = error && error.message;
+    item.status = code === 'cancelled' ? 'cancelled' : 'failed';
+    item.error = code === 'cancelled' ? null : humanError(code);
   }
   render();
   announce(false);
@@ -275,8 +297,11 @@ function humanError(code) {
 
 function cancelRest() {
   state.cancelled = true;
+  if (state.pool) state.pool.cancelQueued();
   for (const item of state.items) {
     if (item.status === 'pending') item.status = 'cancelled';
+    // 已经在编码的那几张（最多 4 张）中断不了，但「取消」后结果不再计入
+    if (item.status === 'working') item.discard = true;
   }
   render();
   setAlert('已取消未开始的任务，已经压好的图仍可下载。');
@@ -390,6 +415,12 @@ function metaParts(item) {
       delta.textContent = ` · ${saved.text}`;
     }
     parts.push(orig, arrow, out, delta);
+    if (item.out.width && item.out.height) {
+      const dims = document.createElement('span');
+      dims.className = 'flat';
+      dims.textContent = ` · ${item.out.width}×${item.out.height}`;
+      parts.push(dims);
+    }
     if (item.out.hasAlpha && item.out.type === 'image/jpeg') {
       const note = document.createElement('span');
       note.className = 'flat';
@@ -482,6 +513,7 @@ function reprocess(items) {
     item.status = 'pending';
     item.out = null;
     item.error = null;
+    item.discard = false;
   }
   state.names.clear();
   render();
@@ -492,6 +524,7 @@ function retryItem(item) {
   item.status = 'pending';
   item.out = null;
   item.error = null;
+  item.discard = false;
   render();
   startProcessing();
 }

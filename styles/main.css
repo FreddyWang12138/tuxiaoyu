@@ -3,7 +3,7 @@
   --panel: #ffffff;
   --ink: #1a1a19;
   --ink-2: #5b5b58;
-  --ink-3: #8a8a85;
+  --ink-3: #6f6f69;
   --line: #e4e4df;
   --line-2: #d2d2cb;
   --accent: #16624a;
@@ -78,6 +78,9 @@ body {
   transition: border-color .15s, background-color .15s;
 }
 .drop:hover { border-color: var(--accent); background: var(--accent-soft); }
+.drop.is-over, .drop.is-focused { border-color: var(--accent); background: var(--accent-soft); outline: 3px solid #0b6b4f; outline-offset: 2px; }
+/* 文件框是 sr-only 的，Tab 落在它上面时把焦点环画在整个拖拽区，否则键盘用户看不到焦点 */
+.drop:focus-within { border-color: var(--accent); background: var(--accent-soft); outline: 3px solid #0b6b4f; outline-offset: 2px; }
 .drop.is-over { border-color: var(--accent); background: var(--accent-soft); }
 .drop-icon svg { width: 34px; height: 34px; color: var(--accent); display: block; margin: 0 auto 2px; }
 .drop-title { font-size: 18px; font-weight: 600; }

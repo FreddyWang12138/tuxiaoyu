@@ -49,6 +49,7 @@
   <section class="picker" aria-labelledby="picker-title">
     <h2 class="sr-only" id="picker-title">选择图片</h2>
     <label class="drop" id="drop" for="file-input" tabindex="0">
+      <input id="file-input" class="sr-only" type="file" accept="image/jpeg,image/png,image/webp" multiple>
       <span class="drop-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" focusable="false"><path d="M12 16V4m0 0L7 9m5-5 5 5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </span>
@@ -56,7 +57,6 @@
       <span class="drop-sub">支持 JPG · PNG · WebP ｜ 单张 ≤ 80MB ｜ 一次 ≤ 60 张</span>
       <span class="drop-privacy">图片只在这台设备上处理，不会上传</span>
     </label>
-    <input id="file-input" class="sr-only" type="file" accept="image/jpeg,image/png,image/webp" multiple>
   </section>
 
   <p id="alert" class="alert" role="status" hidden></p>
@@ -107,6 +107,7 @@
 
     <h2>图片不上传：隐私怎么自己验证</h2>
     <p>这个页面没有上传接口。你选的图只留在当前标签页里，关掉就没了。想确认的话：按 F12 打开开发者工具，切到 Network 面板，然后拖一张图进来压缩——你应该只会看到本站的静态文件请求，不会有任何图片被发出去。页面还带了 <code>connect-src 'none'</code> 的内容安全策略，浏览器层面就不允许它往外连。</p>
+    <p>另外，输出的图片不含原始拍摄信息（EXIF），拍摄设备、时间与地理位置都会在重新编码时去掉；需要保留的话请先备份原图。</p>
   </section>
 </main>
 

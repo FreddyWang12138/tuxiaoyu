@@ -1,0 +1,256 @@
+# 线上探活 + 告警 / 恢复（R3 运维）
+#
+# 设计要点（实现细节与排障见 docs/runbook.md）：
+#   1. 每 30 分钟探一次线上首页 + 3 个关键本地资源，断言 HTTP 200、content-type、真实特征文案。
+#   2. 失败不当场开单：连续 2 次失败才开 issue（用本 workflow 上一次运行结论判定"连续"）。
+#   3. 开单前先查未关闭的 incident：已有就只追加评论，绝不开第二张单。
+#   4. 一次成功且存在未关闭 incident → 评论恢复时间并关单。
+#   5. 本 workflow 只读线上站点，不改代码、不碰仓库内容。
+name: monitor
+
+on:
+  schedule:
+    # 每 30 分钟（UTC）。北京时间 = 每小时 :00 和 :30。
+    # 选 30 分钟：静态站故障靠人感知通常滞后数小时，30 分钟足够早，且每天 48 次远低于私有配额压力。
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  # 只读权限：读取本 workflow 的历史运行结论来判断"连续 2 次失败"，
+  # 不引入任何需要提交的状态文件（contents 仍是只读）。
+  actions: read
+
+# 同一时间只允许一个探活在跑，否则"上一次运行结论"会互相踩踏。
+concurrency:
+  group: monitor-probe
+  cancel-in-progress: false
+
+env:
+  SITE_URL: https://freddywang12138.github.io/tuxiaoyu/
+  # 页面真实特征串，取自 index.html 的 H1（第 49 行）。改文案必须同步改这里。
+  FEATURE_TEXT: 把图片压小，不必上传
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GH_REPO: ${{ github.repository }}
+  TZ: Asia/Shanghai
+
+jobs:
+  probe:
+    name: probe-and-alert
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: 探活首页与关键资源
+        id: probe
+        shell: bash
+        run: |
+          set -uo pipefail
+          BASE="${SITE_URL%/}/"
+          REPORT="$RUNNER_TEMP/probe-report.md"
+          FAILURES=0
+
+          {
+            echo "### 探活明细（$(date '+%Y-%m-%d %H:%M:%S %Z')）"
+            echo ""
+            echo "| 检查项 | 结果 | 详情 |"
+            echo "| --- | --- | --- |"
+          } > "$REPORT"
+
+          # check <名称> <相对路径> <期望 content-type 模式> [必须包含的字符串] [最小字节数]
+          check() {
+            local name="$1" path="$2" want_ct="$3" want_body="${4:-}" min_bytes="${5:-0}"
+            local url="${BASE}${path}"
+            local attempt=1 code ct meta tmp err bytes=0 ok=0 reason="" detail=""
+
+            while [ "$attempt" -le 2 ]; do
+              tmp="$(mktemp)"; err="$(mktemp)"
+              # 一次请求同时拿状态码 / content-type，响应体落盘用于断言
+              meta="$(curl -sS -L --max-time 15 --connect-timeout 5 \
+                        -o "$tmp" -w '%{http_code} %{content_type}' "$url" 2>"$err")" || meta="000 -"
+              code="${meta%% *}"
+              ct="${meta#* }"
+              bytes="$(wc -c < "$tmp" 2>/dev/null | tr -d ' ')"
+              [ -n "$bytes" ] || bytes=0
+
+              ok=1
+              if [ "$code" != "200" ]; then
+                ok=0; reason="HTTP ${code}（期望 200）"
+              elif [ -n "$want_body" ] && ! grep -qF -- "$want_body" "$tmp"; then
+                ok=0; reason="响应体缺少特征串「${want_body}」，页面可能被改坏或返回了错误页"
+              elif [ -n "$want_ct" ]; then
+                case "$ct" in
+                  $want_ct) : ;;
+                  *) ok=0; reason="content-type 为「${ct:-空}」，期望匹配 ${want_ct}" ;;
+                esac
+              fi
+              if [ "$ok" -eq 1 ] && [ "$bytes" -lt "$min_bytes" ]; then
+                ok=0; reason="响应体仅 ${bytes} 字节（< ${min_bytes}），疑似空壳"
+              fi
+
+              [ "$ok" -eq 1 ] && break
+              if [ "$attempt" -eq 1 ]; then
+                echo "… ${name} 第 1 次失败（${reason}），3 秒后重试 1 次"
+                sleep 3
+              fi
+              attempt=$((attempt + 1))
+            done
+
+            detail="HTTP ${code}, ${ct:-无 content-type}, ${bytes} B"
+            if [ "$ok" -eq 1 ]; then
+              echo "✅ ${name} ${detail}"
+              echo "| ${name} | ✅ | \`${path:-/}\` · ${detail} |" >> "$REPORT"
+            else
+              echo "::error::${name} 探活失败：${reason}（${url}）"
+              echo "| ${name} | ❌ | \`${path:-/}\` · ${detail} · **${reason}** |" >> "$REPORT"
+              FAILURES=$((FAILURES + 1))
+            fi
+            if [ -s "$err" ]; then echo "   curl: $(head -c 300 "$err" | tr '\n' ' ')"; fi
+          }
+
+          check "首页" "" "text/html*" "$FEATURE_TEXT" 2000
+          check "样式 main.css" "styles/main.css" "text/css*" "" 500
+          check "主脚本 app.js" "assets/js/app.js" "*javascript*" "" 500
+          check "压缩 Worker" "workers/compress.worker.js" "*javascript*" "" 200
+
+          {
+            echo ""
+            echo "- 目标：${BASE}"
+            echo "- 失败项：${FAILURES} / 4"
+            echo "- 运行：${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          } >> "$REPORT"
+
+          cat "$REPORT" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+          if [ "$FAILURES" -eq 0 ]; then
+            echo "result=ok" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=fail" >> "$GITHUB_OUTPUT"
+          fi
+          echo "failures=${FAILURES}" >> "$GITHUB_OUTPUT"
+
+      - name: 告警判定（连续 2 次失败才开单 / 先查重 / 恢复自动关单）
+        if: always()
+        env:
+          RESULT: ${{ steps.probe.outputs.result }}
+          FAILURES: ${{ steps.probe.outputs.failures }}
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          if [ -z "${RESULT:-}" ] || [ -z "${FAILURES:-}" ]; then
+            echo "::error::探活步骤没有交出完整结果（可能脚本异常），本次跳过 issue 操作，只让运行失败等人工看"
+            exit 1
+          fi
+
+          REPORT="$RUNNER_TEMP/probe-report.md"
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          NOW_CN="$(date '+%Y-%m-%d %H:%M')"
+          NOW_UTC="$(date -u '+%Y-%m-%d %H:%M')"
+
+          # 查重：任何未关闭的 incident 都算"已经有人管了"
+          OPEN="$(gh issue list --label incident --state open --limit 10 \
+                    --json number --jq '.[0].number // ""' 2>/dev/null || echo "")"
+          OPEN="${OPEN//[^0-9]/}"
+
+          if [ "$RESULT" = "ok" ]; then
+            if [ -z "$OPEN" ]; then
+              echo "✅ 探活通过，且没有未关闭的 incident，无需动作"
+              exit 0
+            fi
+            RECOVER_BODY="$(printf '%s\n' \
+              "**已恢复**" \
+              "" \
+              "- 恢复确认时间：${NOW_CN}（Asia/Shanghai） / ${NOW_UTC} UTC" \
+              "- 恢复判据：首页 200 且特征文案存在，3 个关键资源 200 且 content-type 正常" \
+              "- 本次成功运行：${RUN_URL}" \
+              "" \
+              "自动关闭本单。若之后复发，monitor 会重新走「连续 2 次失败」流程再开新单。")"
+            gh issue comment "$OPEN" --body "$RECOVER_BODY" || { echo "::error::恢复评论失败，请手动处理 #${OPEN}"; exit 1; }
+            gh issue close "$OPEN" --reason completed || { echo "::error::自动关单失败，请手动关闭 #${OPEN}"; exit 1; }
+            echo "✅ 已关闭 incident #${OPEN}"
+            exit 0
+          fi
+
+          # ===== 失败分支 =====
+          if [ -n "$OPEN" ]; then
+            UPDATED="$(gh issue view "$OPEN" --json updatedAt --jq .updatedAt 2>/dev/null || echo "")"
+            AGE_H=999
+            if [ -n "$UPDATED" ]; then
+              UPDATED_TS="$(date -u -d "$UPDATED" +%s 2>/dev/null || echo "")"
+              if [ -n "$UPDATED_TS" ]; then AGE_H=$(( ( $(date -u +%s) - UPDATED_TS ) / 3600 )); fi
+            fi
+            if [ "$AGE_H" -ge 2 ]; then
+              STILL_BODY="$(printf '%s\n' \
+                "**故障仍在持续**" \
+                "" \
+                "- 复查时间：${NOW_CN}（Asia/Shanghai） / ${NOW_UTC} UTC" \
+                "- 失败项：${FAILURES} / 4" \
+                "- 本次运行：${RUN_URL}" \
+                "- 处理步骤：见 \`docs/runbook.md\` 对应分级" \
+                "" \
+                "（同一张单不重复开；本条为 30 分钟探活的追加，2 小时内不会刷屏。）")"
+              gh issue comment "$OPEN" --body "$STILL_BODY" || { echo "::error::追加评论失败（incident #${OPEN} 仍开着）"; exit 1; }
+              echo "⚠️ incident #${OPEN} 仍未恢复，已追加评论"
+            else
+              echo "⚠️ incident #${OPEN} 仍未恢复，但 2 小时内已更新过，本次不重复评论（避免刷屏）"
+            fi
+            exit 0
+          fi
+
+          # 没有未关闭 incident：判断是不是"连续第 2 次失败"
+          PREV="$(gh api "repos/${GH_REPO}/actions/workflows/monitor.yml/runs?per_page=15&status=completed" \
+                    --jq "[.workflow_runs[] | select(.id != ${GITHUB_RUN_ID})][0].conclusion" 2>/dev/null || echo "unknown")"
+          echo "上一次 monitor 运行结论：${PREV:-unknown}"
+
+          if [ "$PREV" != "failure" ]; then
+            echo "::warning::第 1 次连续失败，按策略暂不开单；若下一次仍失败（约 30 分钟后）会自动开单"
+            echo "- 本次为第 1 次连续失败，暂不开单（避免抖动误报），失败项 ${FAILURES} / 4" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            exit 0
+          fi
+
+          # 连续 2 次失败：确保标签存在 → 开单
+          gh label create incident --force --color B60205 \
+            --description "线上故障工单（monitor 自动开单，恢复自动关闭）" >/dev/null 2>&1 || true
+
+          BODY_FILE="$RUNNER_TEMP/incident-body.md"
+          {
+            echo "## 线上探活失败（连续 2 次）"
+            echo ""
+            echo "- 站点：${SITE_URL}"
+            echo "- 首次发现：${NOW_CN}（Asia/Shanghai） / ${NOW_UTC} UTC"
+            echo "- 失败项：${FAILURES} / 4"
+            echo "- 触发运行：${RUN_URL}"
+            echo "- 判定规则：本次失败 且 上一次运行也是 failure，才开单（避免抖动误报）"
+            echo ""
+            echo "### 探活明细"
+            echo ""
+            cat "$REPORT"
+            echo ""
+            echo "### 处理人请按顺序做"
+            echo ""
+            echo "1. 打开 ${SITE_URL} 亲眼确认，区分「真挂了」还是「探活误报」（见 \`docs/runbook.md\` 的「误报处理」）。"
+            echo "2. 按 \`docs/runbook.md\` 分级处理：P0 站点打不开 / P1 资源 404 或文案被改 / P2 部署失败但旧版还在。"
+            echo "3. 需要回滚时按 \`docs/launch.md\` 的回滚步骤操作，并在本单记录回滚到的 commit。"
+            echo "4. 恢复后不用手动关单：下一次探活成功会自动评论恢复时间并关闭本单。"
+            echo ""
+            echo "> 本单由 \`.github/workflows/monitor.yml\` 自动创建。请勿在本单贴用户图片、截图中的个人信息或任何密钥。"
+          } > "$BODY_FILE"
+
+          TITLE="[incident] 站点探活失败 $(date +%F)"
+          gh issue create --title "$TITLE" --label incident --body-file "$BODY_FILE" \
+            || { echo "::error::连续 2 次失败但开单失败，请手动开单并检查 issues: write 权限"; exit 1; }
+          echo "- 🚨 已开单：${TITLE}" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+      - name: 按探活结果决定本次运行状态
+        if: always()
+        env:
+          RESULT: ${{ steps.probe.outputs.result }}
+        shell: bash
+        run: |
+          if [ "${RESULT:-}" = "ok" ]; then
+            echo "运行状态：绿（探活通过）"
+            exit 0
+          fi
+          echo "::error::本次探活失败，运行置红（这是「连续失败」计数的依据）"
+          exit 1
