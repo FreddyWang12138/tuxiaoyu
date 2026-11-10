@@ -183,8 +183,7 @@ async function startProcessing() {
   state.pool = pool;
   let cursor = 0;
 
-  // 只在线程真的空出来时才把下一张标成「处理中」，
-  // 这样「取消剩余」才有东西可取消。
+  // 只在线程真的空出来时才把下一张标成「处理中」，这样「取消剩余」才有东西可取消。
   const runner = async () => {
     while (!state.cancelled) {
       const item = queue[cursor];
@@ -205,6 +204,8 @@ async function startProcessing() {
     dom.downloadAll.disabled = !state.items.some((i) => i.status === 'done');
     render();
     announce(true);
+    // 本批处理期间可能又追加了文件（本轮 queue 是快照），收尾时再扫一次 pending。
+    if (!state.cancelled && state.items.some((item) => item.status === 'pending')) startProcessing();
   }
 }
 
@@ -255,11 +256,14 @@ function resolveTarget(item) {
 }
 
 function applyResult(item, result) {
+  // 用户明确选了「转 JPG / 转 WebP」时，格式优先：变大也按他选的格式给，只是提示变大。
+  const explicitFormat = state.settings.format !== 'keep';
   const grew = result.blob.size >= item.file.size * 0.98;
-  const blob = grew ? item.file : result.blob;
-  const type = grew ? item.file.type : result.blob.type || result.type;
+  const keepOriginal = grew && !explicitFormat;
+  const blob = keepOriginal ? item.file : result.blob;
+  const type = keepOriginal ? item.file.type : result.blob.type || result.type;
   const ext = extForMime(type);
-  const name = grew
+  const name = keepOriginal
     ? keepOriginalName(item.file.name)
     : uniqueName(baseName(item.file.name), ext, state.names);
   item.out = {
@@ -267,7 +271,8 @@ function applyResult(item, result) {
     type,
     width: result.width,
     height: result.height,
-    usedOriginal: grew,
+    usedOriginal: keepOriginal,
+    grewWhileConverting: grew && explicitFormat,
     hasAlpha: Boolean(result.hasAlpha),
     name,
   };
@@ -409,6 +414,10 @@ function metaParts(item) {
     if (item.out.usedOriginal) {
       delta.className = 'flat';
       delta.textContent = ' · 没变小，用原图';
+    } else if (item.out.grewWhileConverting) {
+      delta.className = 'flat';
+      const pct = Math.round((item.out.blob.size / item.file.size - 1) * 100);
+      delta.textContent = ` · 转格式后大了 ${pct}%`;
     } else {
       const saved = savedText(item.file.size, item.out.blob.size);
       delta.className = 'delta';
