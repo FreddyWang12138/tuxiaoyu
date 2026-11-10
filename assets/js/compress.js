@@ -36,14 +36,14 @@ export class CompressPool {
    * @param {number} quality
    * @returns {Promise<{blob:Blob,width:number,height:number,hasAlpha:boolean,type:string}>}
    */
-  run(file, type, quality) {
+  run(file, type, quality, target = 0) {
     if (this.closed) return Promise.reject(new Error('closed'));
     if (this.cancelled) return Promise.reject(new Error('cancelled'));
     if (this.workerBroken) return compressOnMainThread(file, type, quality);
     return new Promise((resolve, reject) => {
       const id = (this.seq += 1);
       this.jobs.set(id, { resolve, reject });
-      this.waiting.push({ id, file, type, quality });
+      this.waiting.push({ id, file, type, quality, target });
       this.pump();
     });
   }
@@ -77,7 +77,7 @@ export class CompressPool {
       const job = this.waiting.shift();
       if (!job) break;
       this.busy.set(worker, job.id);
-      worker.postMessage({ id: job.id, file: job.file, type: job.type, quality: job.quality });
+      worker.postMessage({ id: job.id, file: job.file, type: job.type, quality: job.quality, target: job.target });
     }
     // Worker 建不起来：剩余任务退回主线程，别让它们永远挂着。
     if (this.workerBroken && this.waiting.length > 0) {

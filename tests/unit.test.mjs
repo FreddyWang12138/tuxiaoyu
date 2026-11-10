@@ -84,3 +84,44 @@ test('qualityFor：三档严格单调递增（P0-4 的数值前提）', () => {
   assert.equal(compress.qualityFor('image/png', 'high'), 1);
   assert.equal(compress.qualityFor('image/gif', 'mid'), 0.75, '未知格式回落到 JPG 中档');
 });
+
+const target = await import('../assets/js/target.js');
+
+test('targetLabel：0 表示不限，KB/MB 边界正确', () => {
+  assert.equal(target.targetLabel(0), '不限大小');
+  assert.equal(target.targetLabel(200 * 1024), '200 KB');
+  assert.equal(target.targetLabel(1024 * 1024), '1 MB');
+  assert.equal(target.targetLabel(2 * 1024 * 1024), '2 MB');
+});
+
+test('pickBest：有达标项时取其中最大的（质量最好）', () => {
+  const attempts = [
+    { name: 'a', size: 300 * 1024 },
+    { name: 'b', size: 180 * 1024 },
+    { name: 'c', size: 120 * 1024 },
+  ];
+  assert.equal(target.pickBest(attempts, 200 * 1024).name, 'b');
+});
+
+test('pickBest：一个都没达标时取最小的（尽力而为）', () => {
+  const attempts = [{ name: 'a', size: 300 * 1024 }, { name: 'b', size: 260 * 1024 }];
+  assert.equal(target.pickBest(attempts, 200 * 1024).name, 'b');
+});
+
+test('pickBest：target 为 0 时返回第一次尝试；空数组返回 null', () => {
+  assert.equal(target.pickBest([{ name: 'first', size: 10 }], 0).name, 'first');
+  assert.equal(target.pickBest([], 100), null);
+});
+
+test('nextQuality：达到上限次数或区间收敛后返回 null', () => {
+  assert.equal(target.nextQuality(0.35, 0.92, 6), null);
+  assert.equal(target.nextQuality(0.5, 0.505, 1), null);
+  const mid = target.nextQuality(0.4, 0.8, 1);
+  assert.ok(mid > 0.4 && mid < 0.8);
+});
+
+test('TARGET_PRESETS：只有 4 个体积档 + 不限，且都是整 KB/MB', () => {
+  assert.equal(target.TARGET_PRESETS.length, 5);
+  assert.equal(target.TARGET_PRESETS[0].value, 0);
+  assert.ok(target.TARGET_PRESETS.slice(1).every((p) => p.value % 1024 === 0));
+});

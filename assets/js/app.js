@@ -3,6 +3,7 @@
 import { formatBytes, savedText, extForMime, baseName, uniqueName } from './format.js';
 import { MAX_FILES, classify, fileKey, supportsWebpOutput, concurrency } from './detect.js';
 import { CompressPool, qualityFor } from './compress.js';
+import { targetLabel } from './target.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -13,6 +14,7 @@ const dom = {
   options: $('options'),
   fmtGroup: $('fmt-group'),
   qGroup: $('q-group'),
+  target: $('target'),
   fmtHint: $('fmt-hint'),
   results: $('results'),
   summary: $('summary'),
@@ -27,7 +29,7 @@ const state = {
   items: [],
   seen: new Set(),
   names: new Set(),
-  settings: { format: 'keep', quality: 'mid' },
+  settings: { format: 'keep', quality: 'mid', target: 0 },
   webpOk: true,
   pool: null,
   processing: false,
@@ -73,6 +75,7 @@ async function init() {
   });
   dom.fmtGroup.addEventListener('change', onSettingsChange);
   dom.qGroup.addEventListener('change', onSettingsChange);
+  dom.target.addEventListener('change', onSettingsChange);
   dom.downloadAll.addEventListener('click', downloadAll);
   dom.cancel.addEventListener('click', cancelRest);
   dom.reset.addEventListener('click', resetAll);
@@ -84,6 +87,9 @@ function updateHint() {
     return;
   }
   const fmt = state.settings.format;
+  if (state.settings.target) {
+    dom.fmtHint.textContent += ` 已设 ${targetLabel(state.settings.target)} 目标：单张会多试压几次来逼近，速度会慢一点。`;
+  }
   if (fmt === 'keep') {
     dom.fmtHint.textContent = '保持原格式：JPG 仍是 JPG，PNG 会转成 WebP 以保留透明并减小体积。';
   } else if (fmt === 'jpeg') {
@@ -226,7 +232,7 @@ async function processOne(item, pool) {
   render();
   try {
     const quality = qualityFor(target.type, state.settings.quality);
-    const result = await pool.run(item.file, target.type, quality);
+    const result = await pool.run(item.file, target.type, quality, state.settings.target);
     if (item.discard) {
       item.status = 'cancelled';
       item.out = null;
@@ -258,8 +264,11 @@ function resolveTarget(item) {
 function applyResult(item, result) {
   // 用户明确选了「转 JPG / 转 WebP」时，格式优先：变大也按他选的格式给，只是提示变大。
   const explicitFormat = state.settings.format !== 'keep';
+  const target = state.settings.target;
   const grew = result.blob.size >= item.file.size * 0.98;
-  const keepOriginal = grew && !explicitFormat;
+  // 原图本来就比目标小，就不用再压一遍白扣画质了。
+  const alreadyFits = target > 0 && item.file.size <= target;
+  const keepOriginal = alreadyFits || (grew && !explicitFormat);
   const blob = keepOriginal ? item.file : result.blob;
   const type = keepOriginal ? item.file.type : result.blob.type || result.type;
   const ext = extForMime(type);
@@ -274,6 +283,8 @@ function applyResult(item, result) {
     usedOriginal: keepOriginal,
     grewWhileConverting: grew && explicitFormat,
     hasAlpha: Boolean(result.hasAlpha),
+    targetBytes: target,
+    reachedTarget: target > 0 ? (keepOriginal ? true : Boolean(result.reached)) : false,
     name,
   };
   item.status = 'done';
@@ -430,6 +441,14 @@ function metaParts(item) {
       dims.textContent = ` · ${item.out.width}×${item.out.height}`;
       parts.push(dims);
     }
+    if (item.out.targetBytes) {
+      const goal = document.createElement('span');
+      goal.className = item.out.reachedTarget ? 'delta' : 'flat';
+      goal.textContent = item.out.reachedTarget
+        ? ` · 已达 ${targetLabel(item.out.targetBytes)}`
+        : ` · 最接近 ${formatBytes(item.out.blob.size)}，没到 ${targetLabel(item.out.targetBytes)}`;
+      parts.push(goal);
+    }
     if (item.out.hasAlpha && item.out.type === 'image/jpeg') {
       const note = document.createElement('span');
       note.className = 'flat';
@@ -510,6 +529,7 @@ function onSettingsChange() {
   const quality = dom.qGroup.querySelector('input[name="q"]:checked');
   state.settings.format = fmt ? fmt.value : 'keep';
   state.settings.quality = quality ? quality.value : 'mid';
+  state.settings.target = Number(dom.target.value) || 0;
   updateHint();
   if (state.processing) return;
   const finished = state.items.filter((i) => i.status === 'done');
